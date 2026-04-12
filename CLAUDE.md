@@ -6,23 +6,19 @@ Pipeline framework for Claude Code that orchestrates Superpowers, GSD v2, and gs
 
 ```
 coolcode/
-├── setup                  ← install script (run this first)
-├── CLAUDE.md              ← you're reading this
-├── skills/                ← pipeline skill source of truth
-│   ├── pipeline-new/      ← /pipeline-new — full project from scratch
-│   ├── pipeline-init/     ← /pipeline-init — add pipeline to existing project
-│   ├── pipeline-build/    ← /pipeline-build — feature with full pipeline
-│   ├── pipeline-quick/    ← /pipeline-quick — small fix
-│   ├── pipeline-qa/       ← /pipeline-qa — standalone QA
-│   ├── pipeline-scaffold/ ← helper: project scaffolding
-│   ├── pipeline-test-setup/ ← helper: interactive test strategy questionnaire
-│   ├── pipeline-doc-update/ ← helper: living doc updates
-│   └── pipeline-design-gate/ ← helper: Paper design exploration
+├── setup                    ← install script (run this first)
+├── CLAUDE.md                ← you're reading this
+├── skills/                  ← pipeline skill source of truth
+│   ├── pipeline-build/      ← /pipeline-build — end-to-end feature build
+│   ├── pipeline-init/       ← /pipeline-init — set up pipeline on any project
+│   ├── pipeline-qa/         ← /pipeline-qa — standalone QA
+│   ├── pipeline-doc-update/ ← /pipeline-doc-update — update .gsd/ docs from code changes
+│   └── pipeline-test-setup/ ← /pipeline-test-setup — interactive test strategy
 ├── templates/
-│   ├── CLAUDE.md          ← project-level CLAUDE.md template
-│   └── TESTING.md         ← per-project test strategy template
+│   ├── CLAUDE.md            ← project-level CLAUDE.md template (the orchestration layer)
+│   └── TESTING.md           ← per-project test strategy template
 └── gstack-config/
-    └── enabled-skills.txt ← which gstack skills stay active
+    └── enabled-skills.txt   ← which gstack skills stay active
 ```
 
 ## Editing Skills
@@ -36,7 +32,10 @@ All skills in `skills/` are symlinked to `~/.claude/skills/` by the setup script
 | Superpowers | Brainstorming, planning, TDD, code review, subagent execution | Claude Code plugin marketplace |
 | GSD v2 | Parallel autonomous execution for large tasks | `npm install -g gsd-pi@latest` |
 | gstack | QA, security, browser testing, deployment | Cloned by setup script |
-| Paper | UI component design exploration (optional) | MCP server |
+
+## Documentation Architecture
+
+`.gsd/` is the canonical doc home for every project. All tools read from `.gsd/PROJECT.md`, `.gsd/KNOWLEDGE.md`, `.gsd/RUNTIME.md`, `.gsd/DECISIONS.md`. GSD updates these during milestones; `pipeline-doc-update` updates them after Superpowers execution (reads git diff). Superpowers specs/plans in `docs/superpowers/` are ephemeral decision records.
 
 ## gstack Skill Configuration
 
@@ -49,5 +48,4 @@ Currently enabled: review, qa, cso, office-hours, investigate, browse, careful, 
 1. Clone this repo
 2. Run `./setup`
 3. Restart Claude Code
-4. Copy `templates/CLAUDE.md` into your project root and customize
-5. Use `/pipeline-init` to set up an existing project, or `/pipeline-new` to start fresh
+4. Run `/pipeline-init` in your project directory

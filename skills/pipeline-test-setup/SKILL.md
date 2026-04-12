@@ -2,7 +2,7 @@
 name: pipeline-test-setup
 description: Interactive test strategy questionnaire. Asks about platform, tools, commands, env vars, and writes .gsd/TESTING.md.
 disable-model-invocation: true
-user-invocable: false
+user-invocable: true
 allowed-tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion
 ---
 
@@ -10,7 +10,7 @@ allowed-tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion
 
 Interactive questionnaire to define how this project is tested. Writes `.gsd/TESTING.md`.
 
-Called by `/pipeline-new` and `/pipeline-init`. Can also be re-run to update test strategy.
+Called by `/pipeline-build` and `/pipeline-init`. Can also be re-run to update test strategy.
 
 Existing test config: !`[ -f .gsd/TESTING.md ] && head -5 .gsd/TESTING.md || echo "NONE"`
 Package.json: !`[ -f package.json ] && head -20 package.json || echo "NO package.json"`
@@ -190,7 +190,7 @@ When `/pipeline-qa` runs, it reads this file and:
 2. Runs setup commands if needed
 3. Executes each test type with the exact commands above
 4. Reports by severity: critical, important, minor
-5. Offers to fix critical/important issues via `/pipeline-quick`
+5. Offers to fix critical/important issues (use `--fix` flag for auto-fix mode)
 
 ## Test Matrix
 

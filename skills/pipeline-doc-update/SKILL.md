@@ -1,114 +1,79 @@
 ---
 name: pipeline-doc-update
-description: Update project documentation from recent code changes. Reads git diff, updates docs/ files.
+description: Update .gsd/ project documentation from recent code changes. Reads git diff, updates PROJECT.md, RUNTIME.md, KNOWLEDGE.md, appends to DECISIONS.md.
 disable-model-invocation: true
-user-invocable: false
+user-invocable: true
 context: fork
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash
 ---
 
 # Pipeline Doc Update
 
-Update living documentation to reflect recent code changes. Runs in a forked context to avoid polluting the main session.
+Update `.gsd/` docs to reflect recent code changes. Concise targeted edits only — no prose, no filler.
 
 **Input:** `$ARGUMENTS` = git base ref to diff against (commit SHA, branch name, or `HEAD~N`)
 
-## Scope Rules
+GSD installed: !`which gsd 2>/dev/null && echo "YES" || echo "NO"`
 
-**DO update these files:**
-- `docs/ARCHITECTURE.md` — system design, data flow, key directories
-- `docs/API.md` — endpoints, params, responses
-- `docs/COMPONENTS.md` — UI component inventory
-- `docs/MODELS.md` — data shapes, types, relationships
-- `CLAUDE.md` — index updates only (new sections, changed tech stack)
+## Scope
 
-**DO NOT touch these files (other tools manage them):**
-- `docs/superpowers/specs/*` — Superpowers manages specs
-- `docs/superpowers/plans/*` — Superpowers manages plans
-- `.gsd/*` (except `.gsd/designs/`) — GSD manages its own state
-- `.gsd/TESTING.md` — pipeline-test-setup manages this
-- `Brand.md` — brand-kit skill manages this
+**Update:** `.gsd/PROJECT.md`, `.gsd/RUNTIME.md`, `.gsd/KNOWLEDGE.md`, `CLAUDE.md` (index only)
+**Append only:** `.gsd/DECISIONS.md`
+**Refresh:** Run `gsd headless "init"` to regenerate `.gsd/CODEBASE.md` (if GSD installed)
+**Never touch:** `.gsd/STATE.md`, `.gsd/M###-*`, `.gsd/S##-*`, `.gsd/T##-*`, `.gsd/TESTING.md`, `docs/superpowers/*`
 
 ## Process
 
-### 1. Get changed files
+### 1. Refresh CODEBASE.md
+
+```bash
+gsd headless "init" --no-session 2>/dev/null || true
+```
+
+### 2. Get changed files
 
 ```bash
 git diff --name-only $ARGUMENTS..HEAD
 ```
 
-If the base ref doesn't exist, try:
-```bash
-git diff --name-only HEAD~5
-```
+Fallback: `git diff --name-only HEAD~5`. If no changes, exit.
 
-If no changes found, report "No changes since base ref" and exit.
+### 3. Categorize and update
 
-### 2. Read changed files and categorize
+Read changed files. Map to target docs:
 
-Read each changed file (use the Read tool, not cat). Categorize:
+| Change type | Target |
+|------------|--------|
+| Architecture (new dirs, entry points, services) | `.gsd/PROJECT.md` |
+| API (routes, handlers, middleware) | `.gsd/RUNTIME.md` |
+| Components / Models | `.gsd/PROJECT.md` |
+| Patterns, conventions | `.gsd/KNOWLEDGE.md` |
+| Architectural decisions | `.gsd/DECISIONS.md` (append) |
 
-| Category | Indicators |
-|----------|------------|
-| Architecture | New directories, new services, changed entry points, new config files, moved files |
-| API | Files in routes/, api/, endpoints/; changed HTTP handlers; new/modified middleware |
-| Components | Files in components/, pages/, screens/, views/; new .tsx/.vue/.svelte files |
-| Models | Files in models/, types/, schemas/; migration files; changed interfaces/types |
+Skip: test files, config tweaks, lock files, build output, `.gsd/` state files.
 
-Skip files that don't affect documentation:
-- Test files (*.test.*, *.spec.*)
-- Config tweaks (tsconfig, eslint, prettier)
-- Lock files (package-lock, bun.lock, yarn.lock)
-- Build output
-- `.gsd/` files (GSD manages its own docs)
+Read the target doc, then apply **concise** targeted edits:
 
-### 3. Read current docs
+- **Modified feature:** Edit existing section in place
+- **New feature:** Insert after the relevant section
+- **Deleted feature:** Remove the section
+- **New decision:** Append `## YYYY-MM-DD — Title` entry to DECISIONS.md
 
-For each affected category, read the corresponding doc file using the Read tool:
-- Architecture changes → read `docs/ARCHITECTURE.md`
-- API changes → read `docs/API.md`
-- Component changes → read `docs/COMPONENTS.md`
-- Model changes → read `docs/MODELS.md`
+If target doc doesn't exist, create it with a heading and the content.
 
-### 4. Apply targeted edits
+**Writing rules:**
+- Key facts only — file paths, relationships, behavior. No explanatory prose.
+- Point to code, don't duplicate it
+- Match existing doc formatting
+- Preserve GSD-written content
 
-For each affected doc, use the **Edit tool** with `old_string`/`new_string`:
-
-**For modified features:** Find the existing section and edit it in place.
-```
-Edit(file_path="docs/API.md", old_string="existing section content", new_string="updated section content")
-```
-
-**For new features:** Find the right location and insert after it.
-```
-Edit(file_path="docs/API.md", old_string="## Existing Section\n\ncontent", new_string="## Existing Section\n\ncontent\n\n## New Section\n\nnew content")
-```
-
-**For deleted features:** Remove the section.
-```
-Edit(file_path="docs/COMPONENTS.md", old_string="## Deleted Component\n\nold content\n\n", new_string="")
-```
-
-**Rules:**
-- Reference actual file paths (e.g., `src/components/Button.tsx:15-42`)
-- Don't duplicate code in docs — point to it
-- Each section should be scannable in 10 seconds
-- If grep can find it in under 5 seconds, don't document it
-- Match the formatting style already in the doc
-
-### 5. Update CLAUDE.md index
-
-Only if structural changes warrant it (new major sections, changed tech stack). Use the Edit tool.
-
-### 6. Commit
+### 4. Commit
 
 ```bash
-git add docs/ CLAUDE.md
+git add .gsd/PROJECT.md .gsd/RUNTIME.md .gsd/KNOWLEDGE.md .gsd/DECISIONS.md CLAUDE.md 2>/dev/null
 git diff --cached --quiet || git commit -m "docs: update from recent changes"
 ```
 
-The `diff --cached --quiet` check prevents empty commits.
-
 ## Done
 
-Report which docs were updated and what changed. The caller handles routing.
+Report which docs were updated and what changed.

@@ -1,339 +1,148 @@
 ---
 name: pipeline-build
-description: Build a feature with the full pipeline. Supports --spec, --plan, --resume, --no-qa, --type, --budget flags.
+description: Build a feature end-to-end. Brainstorm → plan → execute (Superpowers or GSD) → update docs → QA → fix until clean → ship.
 disable-model-invocation: true
 user-invocable: true
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash, Skill, Agent, AskUserQuestion
-argument-hint: "[feature description] [--spec file|--plan file|--resume|--no-qa|--type bugfix|small|feature|refactor|hotfix|spike|dep-upgrade|security-audit|--budget N]"
+argument-hint: "<feature description>"
 ---
 
 # Pipeline Build
 
-Full pipeline for building a feature on an existing project.
+End-to-end feature build. Each step delegates to the right tool — this skill only orchestrates.
 
-**Input:** `$ARGUMENTS` = feature description + optional flags
+**Input:** `$ARGUMENTS` = feature description
 
-Pipeline state: !`cat .claude/pipeline-state.json 2>/dev/null || echo "NONE"`
 GSD installed: !`which gsd 2>/dev/null && echo "YES" || echo "NO"`
 gstack installed: !`ls ~/.claude/skills/gstack/review/SKILL.md 2>/dev/null && echo "YES" || echo "NO"`
-Project docs: !`ls docs/*.md 2>/dev/null || echo "NO DOCS — run /pipeline-init first"`
+Project docs: !`[ -f .gsd/PROJECT.md ] && head -5 .gsd/PROJECT.md || echo "NO PROJECT.md"`
 Test strategy: !`[ -f .gsd/TESTING.md ] && head -5 .gsd/TESTING.md || echo "NO TESTING.md"`
 
-## Argument Parsing
+## Process
 
-Parse `$ARGUMENTS` for flags (anything with `--` prefix). Everything else is the feature description.
+### 1. Ground
 
-| Flag | Effect |
-|------|--------|
-| `--spec <file>` | Skip to Phase 3 (plan), use provided spec |
-| `--plan <file>` | Skip to Phase 4 (execute), use provided plan |
-| `--resume` | Read pipeline-state.json, enter at last incomplete phase |
-| `--no-qa` | Skip Phase 5 (QA) |
-| `--type <type>` | Execution strategy (see routing table) |
-| `--budget <N>` | Token budget for GSD execution |
+Read the project context before doing anything:
 
-**`--type` values:**
-- `bugfix` — triage, fix, verify (default for bug descriptions)
-- `small` — scope, plan, implement, verify (few tasks)
-- `feature` — full pipeline (default)
-- `refactor` — inventory, plan, migrate, verify
-- `hotfix` — urgent P0, minimal process, fast path
-- `spike` — research/prototype, no shipping expected
-- `dep-upgrade` — dependency update with regression testing
-- `security-audit` — security-focused audit and fix cycle
-
-If no feature description found and no --resume/--spec/--plan, ask user what they want to build.
-
-## Pre-flight Checks
-
-1. Verify `docs/` exists. If not: "Run `/pipeline-init` first to set up pipeline infrastructure."
-2. Verify `CLAUDE.md` exists. If not: same message.
-3. If `--resume` and no `pipeline-state.json` exists: "Nothing to resume. Starting fresh."
-
-## Resume Logic
-
-If `--resume` or pipeline state exists:
-1. Read `.claude/pipeline-state.json`
-2. Find first phase where `status != "completed"`
-3. `AskUserQuestion`: "Pipeline was interrupted at [phase name]. Resume or restart?"
-4. Resume → enter at that phase with existing artifacts
-5. Restart → delete state, start at Phase 1
-
-If the interrupted phase was execution, check `artifacts.executionEngine` in pipeline state:
-- If `"gsd"`: resume with `gsd --continue`
-- If `"superpowers"`: resume in current session — Superpowers worktree and branch are still intact
-- If not set: ask the user which engine was in use
-
-## Phase 1: Requirements
-
-### Initialize state
-
-Write `.claude/pipeline-state.json`:
-```json
-{
-  "version": 2,
-  "pipeline": "build",
-  "feature": "<description>",
-  "startedAt": "<ISO-8601>",
-  "flags": { "noQa": false, "type": "feature", "budget": null },
-  "artifacts": { "executionEngine": null },
-  "phases": {
-    "1": { "name": "requirements", "status": "in_progress" },
-    "2": { "name": "brainstorm-spec", "status": "pending" },
-    "3": { "name": "plan", "status": "pending" },
-    "3.5": { "name": "design-gate", "status": "pending" },
-    "4": { "name": "execute", "status": "pending" },
-    "5": { "name": "qa", "status": "pending" },
-    "6": { "name": "doc-update", "status": "pending" },
-    "7": { "name": "ship", "status": "pending" }
-  }
-}
+```
+Read(.gsd/PROJECT.md)
+Read(.gsd/KNOWLEDGE.md)
+Read(.gsd/RUNTIME.md)
+Read(CLAUDE.md)
 ```
 
-### Gather requirements
-
-**For `--type hotfix`:** Skip requirements gathering — go directly to Phase 2 or Phase 4. Hotfixes need speed.
-
-**For `--type spike`:** Use `AskUserQuestion` — "What question should this spike answer?" and "What's the time box?" Then skip to Phase 4 (no spec, no plan — just explore).
-
-If gstack installed:
+If `.gsd/PROJECT.md` doesn't exist, run `/pipeline-init` first:
 ```
-Skill(gstack:office-hours)
+Skill(pipeline-init)
 ```
-Provide the feature description + project context (read CLAUDE.md, docs/ARCHITECTURE.md).
 
-If gstack NOT installed, use `AskUserQuestion`:
-1. "What exactly should this feature do?" (Header: "Feature")
-2. "What are the edge cases or constraints?" (Header: "Constraints")
-3. "How should it be tested?" (Header: "Testing")
+### 2. Brainstorm
 
-Capture the pre-execution git ref:
-```bash
-git rev-parse HEAD
-```
-Store as `artifacts.baseRef`.
-
-Update state: Phase 1 → `"completed"`, store `artifacts.requirementsPath`.
-
-## Phase 2: Brainstorm + Spec
-
-*Skip if `--spec` flag was provided — store the provided spec path and jump to Phase 3.*
-*Skip for `--type hotfix` — go to Phase 4 with just the bug description.*
-*Skip for `--type spike` — go to Phase 4.*
-
-Load project context for the brainstorming session:
-- Read `CLAUDE.md`, `docs/ARCHITECTURE.md`
-- If `.gsd/KNOWLEDGE.md` exists, read it
-- Read requirements from Phase 1
-
-Invoke:
 ```
 Skill(superpowers:brainstorming)
 ```
 
-Superpowers brainstorming will:
-1. Ask clarifying questions
-2. Propose approaches with trade-offs
-3. Present design sections for user approval
-4. Write spec to `docs/superpowers/specs/YYYY-MM-DD-<topic>-design.md`
-5. Commit spec
+Pass the feature description from `$ARGUMENTS`. Brainstorming outputs a spec to `docs/superpowers/specs/` and auto-chains into `writing-plans` which outputs a plan to `docs/superpowers/plans/`.
 
-Update state: Phase 2 → `"completed"`, store `artifacts.specPath`.
+Wait for both to complete. Note the spec file path — GSD needs it if the user chooses the GSD path.
 
-## Phase 3: Plan
+### 3. Choose Execution Engine
 
-*Skip if `--plan` flag was provided — store the provided plan path and jump to Phase 3.5.*
+Use `AskUserQuestion`:
+- Header: "Execution"
+- Question: "How should this be executed?"
+- Options:
+  - "Superpowers" — description: "Focused execution with worktree isolation. Best for interactive work, TDD-style development, and tasks you want to steer."
+  - "GSD autonomous" — description: "Parallel wave execution with crash recovery. Best for large tasks (>10 subtasks), hands-off execution."
 
-Superpowers brainstorming's terminal state invokes `writing-plans` automatically. Before it does, inject:
+### 4. Execute
 
-> **CRITICAL: Tag each task in the plan with exactly one of these tags on the task header line:**
-> - `<!-- tag: ui-new -->` — brand new UI component (needs Paper design gate before implementation)
-> - `<!-- tag: ui-update -->` — modification to existing UI component
-> - `<!-- tag: logic -->` — backend, logic, infrastructure, configuration, tests
->
-> Example: `- [ ] **Task 3: Build the settings panel** <!-- tag: ui-new -->`
-
-If using `--spec`: invoke `Skill(superpowers:writing-plans)` explicitly with the spec file.
-
-After the plan is written, writing-plans will offer an execution choice (subagent-driven vs inline). **DO NOT let execution start yet.** Tell the user the design gate check comes first.
-
-1. Note the plan path
-2. Update state: Phase 3 → `"completed"`, store `artifacts.planPath`
-3. Proceed to design gate check
-
-## Phase 3.5: Design Gate
-
-Read the plan file. Grep for `<!-- tag: ui-new -->`.
-
-If ui-new tasks found:
+**If Superpowers:**
 ```
-Skill(pipeline-design-gate) with plan file path
+Skill(superpowers:subagent-driven-development)
 ```
-
-If none: skip.
-
-Update state: Phase 3.5 → `"completed"`, store `artifacts.designArtifacts`.
-
-## Phase 4: Execute
-
-Read the plan to understand scope. The `--type` flag and task count determine execution strategy.
-
-### Step 4a: Set up worktree (Superpowers path only)
-
-**REQUIRED before Superpowers execution.** If routing table selects a Superpowers strategy, invoke:
-```
-Skill(superpowers:using-git-worktrees)
-```
-This creates an isolated branch so implementation doesn't wreck the current branch. It will:
-- Create a worktree in `.worktrees/` (or ask user preference)
-- Verify `.worktrees/` is in `.gitignore`
-- Install dependencies in the worktree
-- Run tests to establish a clean baseline
-
-**Skip for GSD execution** — GSD creates its own branch automatically (e.g., `gsd/small-feature/...`).
-
-### Step 4b: Execute via routing table
-
-| --type | GSD installed | Strategy |
-|--------|--------------|----------|
-| `bugfix` | Yes | `gsd start bugfix` |
-| `bugfix` | No | `Skill(superpowers:systematic-debugging)` → `Skill(superpowers:test-driven-development)` |
-| `small` | Yes | `gsd start small-feature` |
-| `small` | No | `Skill(superpowers:subagent-driven-development)` |
-| `feature` (default) | Yes, >10 tasks | Offer choice: Superpowers (sequential) or `gsd start full-project` (parallel) |
-| `feature` (default) | Yes, ≤10 tasks | `Skill(superpowers:subagent-driven-development)` |
-| `feature` (default) | No | `Skill(superpowers:subagent-driven-development)` |
-| `refactor` | Yes | `gsd start refactor` |
-| `refactor` | No | `Skill(superpowers:subagent-driven-development)` |
-| `hotfix` | Yes | `gsd start hotfix` |
-| `hotfix` | No | `Skill(superpowers:test-driven-development)` directly |
-| `spike` | Yes | `gsd start spike` |
-| `spike` | No | Explore and prototype in current session — no subagent needed |
-| `dep-upgrade` | Yes | `gsd start dep-upgrade` |
-| `dep-upgrade` | No | `Skill(superpowers:subagent-driven-development)` |
-| `security-audit` | Yes | `gsd start security-audit` |
-| `security-audit` | No | `Skill(gstack:cso)` for audit, then TDD for fixes |
-
-#### For Superpowers subagent-driven-development:
-
-Store `artifacts.executionEngine = "superpowers"` in pipeline state.
-
-Invoke `Skill(superpowers:subagent-driven-development)` with:
-- The full plan text (don't make subagents read the file)
-- For `<!-- tag: ui-new -->` tasks: include `.gsd/designs/task-{N}-{name}.md` content
-
-Superpowers handles: dispatch per task → spec compliance review → code quality review → TDD → commits. Each task gets a fresh subagent.
-
-After execution, Superpowers auto-invokes `finishing-a-development-branch`. **Let it complete** — it presents 4 options (merge locally, create PR, keep branch, discard). Do NOT interrupt.
-
-#### For GSD execution:
-
-Store `artifacts.executionEngine = "gsd"` in pipeline state.
-
-If `--budget` flag: configure GSD preferences first.
-
-For `--type` workflows (bugfix, hotfix, refactor, spike, dep-upgrade, security-audit):
-```bash
-gsd headless "start <template> <description>" --no-session
-```
-
-For `feature` with >10 tasks (full project mode):
-```bash
-gsd headless "start full-project <feature description>" --no-session
-```
-
-GSD creates its own milestone, plans tasks, and executes in parallel waves.
-
-Monitor progress:
-```bash
-gsd headless "query"  # ~50ms, no LLM, returns JSON
-```
-
-GSD runs until complete. Check exit: 0 = complete, 1 = error.
-
-**After GSD completes**, explicitly invoke finishing-a-development-branch (GSD does NOT call it automatically):
+Superpowers auto-manages worktree setup. After execution:
 ```
 Skill(superpowers:finishing-a-development-branch)
 ```
+This presents merge/PR/keep/discard options.
 
-### Step 4c: Finish the development branch
+**If GSD:**
+```bash
+gsd headless new-milestone --context <spec-file-path> --auto
+```
+Where `<spec-file-path>` is the spec from Step 2 (e.g., `docs/superpowers/specs/2024-01-15-feature-name.md`).
 
-`finishing-a-development-branch` presents 4 options:
-1. **Merge back locally** — merges worktree branch into base
-2. **Push and create PR** — pushes branch and creates PR via `gh`
-3. **Keep branch as-is** — leaves worktree intact for later
-4. **Discard** — deletes branch and work
+GSD manages its own branch, crash recovery, verification enforcement, and updates `.gsd/` docs (PROJECT.md, KNOWLEDGE.md, RUNTIME.md, DECISIONS.md) automatically during milestone execution.
 
-Note which option the user chose. Store in state as `artifacts.branchOutcome`.
+### 5. Update Docs
 
-Update state: Phase 4 → `"completed"`.
+After execution completes, sync documentation:
 
-## Phase 5: QA
+**If GSD was used:** GSD already updated `.gsd/` docs during the milestone. Run doc-update as a safety net:
+```
+Skill(pipeline-doc-update)
+```
 
-*Skip if `--no-qa` flag.*
-*Skip if `--type spike` — spikes don't get QA.*
+**If Superpowers was used:** This step is essential since GSD's docs are stale:
+```bash
+gsd headless "init" --no-session
+```
+This refreshes `.gsd/CODEBASE.md` (the file map). Then:
+```
+Skill(pipeline-doc-update)
+```
+This reads the git diff and updates `.gsd/PROJECT.md`, `.gsd/RUNTIME.md`, `.gsd/KNOWLEDGE.md`, and appends to `.gsd/DECISIONS.md`.
 
-Invoke: `Skill(pipeline-qa) --skip-review`
+### 6. QA + Iterate
 
-The `--skip-review` flag prevents double review — `gstack:ship` in Phase 7 runs `gstack:review` internally.
+Run QA:
+```
+Skill(pipeline-qa)
+```
 
-pipeline-qa reads `.gsd/TESTING.md` and dispatches checks. It uses `gstack:qa-only` for browser testing (report only, no fixes) and routes any fixes through proper channels.
+If QA finds critical or important issues:
 
-Update state: Phase 5 → `"completed"`, store `artifacts.qaReportPath`.
+1. **Present ALL findings** — show the complete QA report with every issue, severity, and file path
+2. **Ask qualifying questions** using `AskUserQuestion`:
+   - Header: "Fix approach"
+   - Question: "QA found N issues. How should I approach fixes?"
+   - Options:
+     - "Fix all" — description: "Fix every critical and important issue, then re-run QA"
+     - "Fix critical only" — description: "Fix only critical issues, leave important as known"
+     - "Let me review first" — description: "I'll look at the report and tell you what to fix"
+3. **Auto-fix** each issue using the appropriate tool:
+   - Bug with unclear cause → `Skill(superpowers:systematic-debugging)`
+   - Bug with clear fix → `Skill(superpowers:test-driven-development)`
+   - Browser UI bug → `Skill(gstack:qa)`
+   - Security vulnerability → `Skill(superpowers:test-driven-development)` (write test proving vuln, then fix)
+4. **Re-run QA** after all fixes:
+   ```
+   Skill(pipeline-qa)
+   ```
+5. **Repeat** steps 1-4 until QA is clean (no critical or important issues).
 
-## Phase 6: Doc Update
+### 7. Ship
 
-*Skip if `--type spike`.*
+When QA passes, suggest shipping:
 
-Invoke: `Skill(pipeline-doc-update)` with `artifacts.baseRef`
+Use `AskUserQuestion`:
+- Header: "Ship"
+- Question: "QA is clean. Ready to ship?"
+- Options:
+  - "Ship it" — description: "VERSION bump, CHANGELOG, review, PR"
+  - "Not yet" — description: "I want to make more changes first"
 
-This runs in a fork — reads git diff, updates docs/, commits.
+If ship:
+```
+Skill(gstack:ship)
+```
 
-Update state: Phase 6 → `"completed"`.
+## Done
 
-## Phase 7: Ship + Cleanup
-
-*Skip if `--type spike`.*
-
-### Ship options
-
-The right ship action depends on what happened in Phase 4:
-
-**If user chose "Push and create PR" in finishing-a-development-branch:**
-→ PR already exists. Offer gstack:ship enhancements:
-
-`AskUserQuestion`: "PR already created. Want the full ship workflow?" (Header: "Ship")
-- "Yes — VERSION bump, CHANGELOG, review" → `Skill(gstack:ship)` — this updates the existing PR
-- "No — PR is good as-is" → skip
-
-**If user chose "Merge back locally":**
-→ Code is on the base branch. Offer shipping:
-
-`AskUserQuestion`: "Code merged locally. What's next?" (Header: "Ship")
-- "Full ship (VERSION, CHANGELOG, PR)" → `Skill(gstack:ship)`
-- "Push to remote" → `git push`
-- "Done" → skip
-
-**If user chose "Keep branch" or GSD was used:**
-→ Work is on a branch. Offer full ship:
-
-`AskUserQuestion`: "Ready to ship?" (Header: "Ship")
-- "Full ship (VERSION, CHANGELOG, PR)" → `Skill(gstack:ship)`
-- "Just push the branch" → `git push -u origin HEAD`
-- "Done — I'll handle it later" → skip
-
-### Deploy chain (if ship created a PR)
-
-If `gstack:ship` was used and created/updated a PR, offer the deploy chain:
-
-`AskUserQuestion`: "PR is up. Want to land and deploy?" (Header: "Deploy")
-- "Yes — merge, wait for CI, verify production" → `Skill(gstack:land-and-deploy)` — this merges the PR, waits for CI/deploy, then runs `Skill(gstack:canary)` automatically
-- "No — I'll merge manually" → skip
-
-### Cleanup
-
-1. Delete `.claude/pipeline-state.json`
-2. If gstack learn available: `Skill(gstack:learn)` to store learnings from this build
-3. Final commit if uncommitted changes
-
-Report: "Feature built, tested, and documented."
+Report:
+- What was built (link to spec)
+- Execution path used (Superpowers or GSD)
+- QA results (final pass)
+- Number of fix iterations
+- Ship status (PR link if shipped)

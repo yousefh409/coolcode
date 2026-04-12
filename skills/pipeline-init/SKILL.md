@@ -1,198 +1,225 @@
 ---
 name: pipeline-init
-description: Add the pipeline system to an existing project. Discovers codebase, generates docs, configures testing, creates CLAUDE.md.
+description: Set up the pipeline on a new or existing project. Deep-dives the codebase with parallel sub-agents, generates concise .gsd/ docs, configures testing, creates CLAUDE.md.
 disable-model-invocation: true
 user-invocable: true
 allowed-tools: Read, Write, Edit, Glob, Grep, Bash, Skill, Agent, AskUserQuestion
-argument-hint: (run in an existing project directory)
+argument-hint: "[project name or description] (run in the project directory)"
 ---
 
 # Pipeline Init
 
-Add pipeline infrastructure to an existing project without changing any code.
+Set up pipeline infrastructure. Deep-dives the codebase to produce concise, high-signal docs.
 
-Existing CLAUDE.md: !`[ -f CLAUDE.md ] && head -5 CLAUDE.md || echo "NONE"`
-Existing docs: !`ls docs/*.md 2>/dev/null || echo "NONE"`
-Existing .gsd: !`ls .gsd/ 2>/dev/null || echo "NONE"`
+Existing source files: !`ls src/ lib/ app/ *.py *.go *.rs main.* index.* 2>/dev/null | head -5 || echo "NONE"`
+Existing CLAUDE.md: !`[ -f CLAUDE.md ] && head -3 CLAUDE.md || echo "NONE"`
+Existing .gsd docs: !`ls .gsd/PROJECT.md .gsd/KNOWLEDGE.md .gsd/RUNTIME.md 2>/dev/null || echo "NONE"`
 GSD installed: !`which gsd 2>/dev/null && echo "YES" || echo "NO"`
 gstack installed: !`ls ~/.claude/skills/gstack/review/SKILL.md 2>/dev/null && echo "YES" || echo "NO"`
 
 ## Process
 
-### 1. Discover Codebase
+### 1. Detect Mode
 
-Dispatch an Explore agent to scan the project:
+- **Source files found** → existing project (skip Step 2)
+- **No source files** → greenfield (run Step 2)
 
-```
-Agent(subagent_type="Explore", prompt="Analyze this project thoroughly:
-- Language and framework (check package.json, requirements.txt, go.mod, Cargo.toml, etc.)
-- Directory structure and entry points
-- Dependencies and their purposes
-- Test setup: framework, config files, existing test files, test scripts
-- Build system and dev server commands
-- Database / API layer
-- Existing documentation
-- CI/CD configuration
-- Key architecture patterns (monolith, microservices, serverless, etc.)
-- Naming conventions visible in the code
-Return a structured summary with exact file paths for everything found.")
-```
-
-Wait for the agent to return. This summary drives everything below.
-
-### 2. Create directory structure
+### 2. Greenfield Setup (skip if existing)
 
 ```bash
-mkdir -p docs .gsd/designs .claude
+git init 2>/dev/null || true
+mkdir -p src .gsd docs/superpowers/specs docs/superpowers/plans
+echo "0.1.0" > VERSION
 ```
 
-Only create what doesn't exist. **Never overwrite** existing files.
+Ask user what they're building using `AskUserQuestion`:
+- Header: "Project type"
+- Options: "Web app (Next.js / React / Vue)", "API (Express / FastAPI / Django / Go)", "Mobile (React Native / Expo / Flutter)", "CLI / Library"
 
-### 3. Initialize GSD
+Create minimal directory structure. Don't scaffold code — just directories and a README stub.
+
+### 3. Deep-Dive Codebase Discovery
+
+This is the most important step. Dispatch **parallel sub-agents** to thoroughly analyze large codebases. Each agent focuses on one domain so nothing gets missed.
+
+**Launch all 4 agents in parallel:**
+
+```
+Agent(subagent_type="Explore", prompt="ARCHITECTURE SCAN: Analyze the project structure deeply.
+- Language, framework, runtime (check package.json, requirements.txt, go.mod, Cargo.toml, pyproject.toml, etc.)
+- Every top-level and second-level directory — what lives in each
+- Entry points: main files, route definitions, app bootstrap
+- Build system, dev server commands, scripts in package.json
+- Infrastructure: hosting, CI/CD configs, Dockerfiles, cloud configs
+- Monorepo structure if applicable (workspaces, packages)
+Return file paths for everything found. Be thorough — this is a large codebase.")
+```
+
+```
+Agent(subagent_type="Explore", prompt="API & RUNTIME SCAN: Find every API endpoint and runtime dependency.
+- All route files, HTTP handlers, middleware, GraphQL resolvers
+- Map each endpoint: method, path, params, response shape
+- Auth patterns (JWT, sessions, API keys, OAuth)
+- Environment variables referenced in code (process.env, os.environ, etc.)
+- External services: databases, caches, queues, third-party APIs
+- WebSocket or real-time connections
+Return file paths and specific line numbers for key definitions.")
+```
+
+```
+Agent(subagent_type="Explore", prompt="DATA & UI SCAN: Find all data models and UI components.
+- Database models/schemas (ORM models, migrations, SQL files)
+- TypeScript interfaces/types that define domain objects
+- Key relationships between models (foreign keys, references)
+- UI components: inventory with file paths, shared vs page-specific
+- Component hierarchy and key prop interfaces
+- State management patterns (Redux, Zustand, Context, signals)
+Return file paths for everything. Include line numbers for type definitions.")
+```
+
+```
+Agent(subagent_type="Explore", prompt="PATTERNS & TESTING SCAN: Identify conventions and test infrastructure.
+- Naming conventions: files (camelCase, kebab-case), variables, functions, classes
+- Test framework, config files, test directories, existing test files
+- Test patterns used (describe/it, test(), pytest fixtures, table-driven)
+- Error handling patterns
+- Logging approach
+- Code organization conventions (barrel exports, index files, co-location)
+- Git conventions (commit message style, branch naming)
+Return specific examples of each pattern found, with file paths.")
+```
+
+Wait for all 4 agents to return. Merge their findings — this combined summary drives everything below.
+
+### 4. Initialize GSD
 
 If GSD is installed:
 ```bash
+mkdir -p .gsd
 gsd headless "init" --no-session
 ```
 
-GSD creates `.gsd/CODEBASE.md` (project file map) and `.gsd/STATE.md`.
-
-If GSD is NOT installed, skip this step (pipeline creates what it needs in Step 3a).
-
-### 3a. Create pipeline-owned files
-
-These files are pipeline-managed, not GSD-managed. Always create them:
-
-- `.gsd/KNOWLEDGE.md` — Populated with patterns discovered in Step 1:
-  - Naming conventions (camelCase? snake_case?)
-  - Test patterns (describe/it? test()? pytest?)
-  - Architecture decisions visible in code
-  - Key file paths a subagent would need
-- `.gsd/REQUIREMENTS.md` — `# Requirements` heading only
-
-### 4. Generate docs
-
-Based on discovery results, use the Write tool to create each doc. **Only include information discovered from actual code — never guess.**
-
-**`docs/ARCHITECTURE.md`** — System design from discovery:
-- Key directories and what lives in each
-- Data flow (e.g., "request → middleware → handler → DB → response")
-- Infrastructure (hosting, database, external services)
-- Entry points (main file, route definitions, etc.)
-- File paths for everything referenced
-
-**`docs/API.md`** — If API endpoints discovered:
-- Routes with HTTP methods
-- Key params and response shapes
-- Auth requirements
-- If no API found, write: "# API\n\nNo API layer detected. Add endpoints here as they're built."
-
-**`docs/COMPONENTS.md`** — If UI components discovered:
-- Component inventory with file paths
-- Key component hierarchies
-- Shared/reusable components vs page-specific
-- If no UI found, write: "# Components\n\nNo UI components detected. Add components here as they're built."
-
-**`docs/MODELS.md`** — If data models discovered:
-- Types/interfaces with file paths
-- Database schema (if migrations found)
-- Key relationships
-- If no models found, write: "# Models\n\nNo data models detected. Add models here as they're built."
-
-**If any doc file already exists**, read it first and only add missing information using the Edit tool.
-
-### 5. Generate CLAUDE.md
-
-**If CLAUDE.md exists:** Read it. Use Edit to add these sections if missing:
-- `## Pipeline Commands` table
-- `## Skill Routing` section
-- `## Documentation` links
-- `## Testing` reference to `.gsd/TESTING.md`
-
-**If no CLAUDE.md:** Use Write to create one:
-
-```markdown
-# [Project Name]
-
-[Description from discovery]
-
-## Tech Stack
-
-[From discovery — language, framework, database, hosting]
-
-## Quick Start
-
-[From discovery — install command, dev server command]
-
-## Pipeline Commands
-
-| Command | When | What happens |
-|---------|------|--------------|
-| `/pipeline-build` | New feature | Requirements → brainstorm → spec → plan → design → execute → QA → docs |
-| `/pipeline-quick` | Small fix | Superpowers handles it, conditional doc update |
-| `/pipeline-qa` | Run QA | Code review + security + browser testing + unit tests |
-
-## Skill Routing
-
-- "brainstorm", "design", "plan a feature" → `Skill(superpowers:brainstorming)`
-- "review this PR", "code review" → `Skill(gstack:review)`
-- "security audit" → `Skill(gstack:cso)`
-- "test this site", "QA" → `Skill(gstack:qa)`
-- "debug this" → `Skill(gstack:investigate)`
-- "ship", "create PR" → `Skill(gstack:ship)`
-
-## Documentation
-
-- `docs/ARCHITECTURE.md` — system design, data flow
-- `docs/API.md` — endpoints, params, responses
-- `docs/COMPONENTS.md` — UI component inventory
-- `docs/MODELS.md` — data shapes, relationships
-- `.gsd/TESTING.md` — test strategy
-
-## Testing
-
-See `.gsd/TESTING.md` for full test strategy.
-
-## Conventions
-
-[From discovery — naming, testing patterns, commit style]
+If GSD is NOT installed:
+```bash
+mkdir -p .gsd
 ```
 
-Present the CLAUDE.md to the user. Ask if they want changes using `AskUserQuestion`.
+### 5. Generate .gsd/ Docs
 
-### 6. Configure Testing
+Write concise, high-signal docs. **Key facts only — file paths, relationships, behavior. No explanatory prose, no filler.**
 
-Invoke: `Skill(pipeline-test-setup)`
+**`.gsd/PROJECT.md`** — Living project doc:
+```markdown
+# Project
 
-This runs the interactive test strategy questionnaire and writes `.gsd/TESTING.md`. The questionnaire auto-detects what it can from the existing project before asking questions.
+[One-line description]
 
-### 7. Seed Learnings
+## Architecture
+- [Key dir] — [what it does]
+- [Key dir] — [what it does]
+
+## Data Flow
+[request → middleware → handler → service → DB → response]
+
+## Entry Points
+- `path/to/main.ts` — app bootstrap
+- `path/to/routes/` — route definitions
+
+## Components
+- `path/Component.tsx` — [purpose]
+
+## Models
+- `path/Model.ts` — [fields, relationships]
+
+## Infrastructure
+- [hosting, DB, external services]
+```
+
+**`.gsd/RUNTIME.md`** — Runtime context:
+```markdown
+# Runtime
+
+## Endpoints
+- `GET /api/users` — list users, paginated
+- `POST /api/users` — create user, requires auth
+
+## Environment Variables
+- `DATABASE_URL` — PostgreSQL connection
+- `JWT_SECRET` — auth token signing
+
+## Services
+- PostgreSQL (primary DB)
+- Redis (session cache)
+```
+
+**`.gsd/KNOWLEDGE.md`** — Patterns and conventions:
+```markdown
+# Knowledge
+
+## Naming
+- Files: kebab-case
+- Components: PascalCase
+- Variables: camelCase
+
+## Testing
+- Framework: vitest
+- Command: `npm test`
+- Pattern: describe/it with factory helpers
+
+## Patterns
+- [Key pattern with file path example]
+```
+
+**Format rules:**
+- Bullet points and tables, not paragraphs
+- Every claim has a file path
+- If grep can find it in 5 seconds, don't document it
+- Maximum 80 lines per doc for a medium project — scale proportionally
+
+**If files already exist** (from a previous GSD milestone), read first, enrich with Edit tool. Never overwrite GSD content.
+
+```bash
+mkdir -p docs/superpowers/specs docs/superpowers/plans
+```
+
+### 6. Generate CLAUDE.md
+
+**If CLAUDE.md exists:** Read it. Use Edit to add missing sections (Documentation table, Testing, Grounding Rules, Tools Reference, Workflow Guidance, Pipeline Commands).
+
+**If no CLAUDE.md:** Populate the template with discovery results:
+- Project name, description, tech stack, quick start commands
+- Test commands from discovery
+- Conventions from discovery
+- Keep grounding rules, tools reference, workflow guidance as-is
+
+Present to user via `AskUserQuestion`:
+- Header: "CLAUDE.md"
+- Options: "Looks good", "I want to edit it", "Regenerate with changes"
+
+### 7. Configure Testing
+
+```
+Skill(pipeline-test-setup)
+```
+
+### 8. Seed Learnings
 
 If gstack learn is available:
 ```
 Skill(gstack:learn)
 ```
 
-This reviews and stores the patterns discovered during init for future sessions.
-
-### 8. Update .gitignore
-
-Append if not present:
-```
-.claude/pipeline-state.json
-```
-
 ### 9. Commit
 
 ```bash
-git add docs/ .gsd/ CLAUDE.md .gitignore VERSION 2>/dev/null
+git add .gsd/ docs/ CLAUDE.md .gitignore VERSION 2>/dev/null
 git diff --cached --quiet || git commit -m "chore: initialize pipeline infrastructure"
 ```
 
 ## Done
 
 Report:
-- What was discovered about the project
-- What docs were created/updated
-- What test strategy was configured
-- The project is now ready for `/pipeline-build`, `/pipeline-quick`, and `/pipeline-qa`
+- Key findings from discovery
+- `.gsd/` docs created (PROJECT.md, RUNTIME.md, KNOWLEDGE.md)
+- Test strategy configured
+- Commands: `/pipeline-build`, `/pipeline-qa`, `/pipeline-doc-update`, `/pipeline-test-setup`

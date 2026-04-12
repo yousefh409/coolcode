@@ -16,6 +16,15 @@ echo ""
 echo "→ Installing pipeline skills..."
 mkdir -p "$SKILLS_DIR"
 
+# Clean up stale symlinks from previous installs
+for stale in pipeline-new pipeline-quick pipeline-scaffold pipeline-design-gate; do
+  target="$SKILLS_DIR/$stale"
+  if [ -e "$target" ] || [ -L "$target" ]; then
+    rm -rf "$target"
+    echo "  ✗ removed stale: $stale"
+  fi
+done
+
 for skill_dir in "$COOLCODE_DIR"/skills/pipeline-*; do
   skill_name=$(basename "$skill_dir")
   target="$SKILLS_DIR/$skill_name"
@@ -132,14 +141,10 @@ else
     if (!settings.permissions.allow) settings.permissions.allow = [];
 
     const toAdd = [
-      'Skill(pipeline-new)',       'Skill(pipeline-new:*)',
-      'Skill(pipeline-init)',      'Skill(pipeline-init:*)',
       'Skill(pipeline-build)',     'Skill(pipeline-build:*)',
-      'Skill(pipeline-quick)',     'Skill(pipeline-quick:*)',
+      'Skill(pipeline-init)',      'Skill(pipeline-init:*)',
       'Skill(pipeline-qa)',        'Skill(pipeline-qa:*)',
-      'Skill(pipeline-design-gate)', 'Skill(pipeline-design-gate:*)',
       'Skill(pipeline-doc-update)', 'Skill(pipeline-doc-update:*)',
-      'Skill(pipeline-scaffold)',  'Skill(pipeline-scaffold:*)',
       'Skill(pipeline-test-setup)', 'Skill(pipeline-test-setup:*)',
       'Skill(gstack:review)',      'Skill(gstack:review:*)',
       'Skill(gstack:qa)',          'Skill(gstack:qa:*)',
@@ -157,6 +162,21 @@ else
       'Bash(gsd *)'
     ];
 
+    // Remove stale permissions from deleted skills
+    const stale = [
+      'Skill(pipeline-new)',       'Skill(pipeline-new:*)',
+      'Skill(pipeline-quick)',     'Skill(pipeline-quick:*)',
+      'Skill(pipeline-design-gate)', 'Skill(pipeline-design-gate:*)',
+      'Skill(pipeline-scaffold)',  'Skill(pipeline-scaffold:*)'
+    ];
+
+    let removed = 0;
+    settings.permissions.allow = settings.permissions.allow.filter(p => {
+      if (stale.includes(p)) { removed++; return false; }
+      return true;
+    });
+    if (removed > 0) console.log('  ✓ Removed ' + removed + ' stale permissions');
+
     let added = 0;
     for (const perm of toAdd) {
       if (!settings.permissions.allow.includes(perm)) {
@@ -165,9 +185,9 @@ else
       }
     }
 
-    if (added > 0) {
+    if (added > 0 || removed > 0) {
       fs.writeFileSync('$SETTINGS', JSON.stringify(settings, null, 2) + '\n');
-      console.log('  ✓ Added ' + added + ' permissions');
+      if (added > 0) console.log('  ✓ Added ' + added + ' permissions');
     } else {
       console.log('  ✓ All permissions already present');
     }
@@ -191,12 +211,11 @@ echo ""
 echo "  ✓ Setup complete!"
 echo ""
 echo "  Pipeline commands available (restart Claude Code session to load):"
-echo "    /pipeline-new    — Start a new project from scratch"
-echo "    /pipeline-init   — Add pipeline to an existing project"
-echo "    /pipeline-build  — Build a feature (full pipeline)"
-echo "    /pipeline-quick  — Quick fix or small feature"
-echo "    /pipeline-qa     — Run QA on current state"
+echo "    /pipeline-build      — Build a feature end-to-end"
+echo "    /pipeline-init       — Set up pipeline on a new or existing project"
+echo "    /pipeline-qa         — Run QA on current state"
+echo "    /pipeline-doc-update — Update docs from recent changes"
+echo "    /pipeline-test-setup — Configure test strategy"
 echo ""
-echo "  To use in a project, copy templates/CLAUDE.md into your project root"
-echo "  and customize it for your project."
+echo "  To use in a project, run /pipeline-init in your project directory."
 echo ""

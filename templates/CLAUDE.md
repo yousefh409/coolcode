@@ -12,49 +12,30 @@
 ## Quick Start
 
 ```bash
-[install command, e.g., npm install]
-[dev server command, e.g., npm run dev]
+[install command]
+[dev server command]
 ```
-
-## Pipeline Commands
-
-| Command | When | What happens |
-|---------|------|--------------|
-| `/pipeline-build` | New feature | Requirements → brainstorm → spec → plan → design → worktree → execute → finish branch → QA → docs → ship |
-| `/pipeline-quick` | Small fix / bug | Routes to systematic-debugging (bugs), TDD (clear fixes), or brainstorming (features) |
-| `/pipeline-qa` | Run QA | Reads TESTING.md → dispatches unit/review/security/browser/perf → reports → routes fixes |
-| `/pipeline-init` | Re-init pipeline | Re-discover codebase, update docs, reconfigure testing |
-
-### Flags for /pipeline-build
-
-- `--spec <file>` — skip to planning (you have a spec)
-- `--plan <file>` — skip to execution (you have a plan)
-- `--resume` — continue interrupted pipeline (uses `gsd --continue` for GSD sessions)
-- `--no-qa` — skip QA phase
-- `--type bugfix|small|feature|refactor|hotfix|spike|dep-upgrade|security-audit` — execution strategy
-- `--budget <N>` — token budget for GSD execution
-
-## Skill Routing
-
-- "brainstorm", "design a feature", "think through this" → `Skill(superpowers:brainstorming)`
-- "debug this", "why is this broken" → `Skill(superpowers:systematic-debugging)` or `Skill(gstack:investigate)` for production
-- "review this PR", "code review" → `Skill(gstack:review)`
-- "security audit" → `Skill(gstack:cso)`
-- "test this site", "QA" → `Skill(gstack:qa)` (fix loop) or `Skill(gstack:qa-only)` (report only)
-- "check performance" → `Skill(gstack:benchmark)`
-- "ship", "create PR" → `Skill(gstack:ship)` → `Skill(gstack:land-and-deploy)` → `Skill(gstack:canary)`
-- "be careful", "production change" → `Skill(gstack:careful)`
-- "what have we learned" → `Skill(gstack:learn)`
 
 ## Documentation
 
-- `docs/ARCHITECTURE.md` — system design, data flow, where things live
-- `docs/API.md` — endpoints, params, responses
-- `docs/COMPONENTS.md` — UI component inventory
-- `docs/MODELS.md` — data shapes, relationships
-- `.gsd/TESTING.md` — test strategy (how this project is tested)
-- `docs/superpowers/specs/` — design specs from brainstorming
-- `docs/superpowers/plans/` — implementation plans
+All canonical project docs live in `.gsd/`. This is the single source of truth — all tools read from here.
+
+| File | What it covers | Updated by |
+|------|---------------|-----------|
+| `.gsd/PROJECT.md` | Architecture, system design, data flow, components, models | GSD (during milestones) or `pipeline-doc-update` (after Superpowers work) |
+| `.gsd/RUNTIME.md` | API endpoints, env vars, services | GSD or `pipeline-doc-update` |
+| `.gsd/KNOWLEDGE.md` | Conventions, patterns, cross-session lessons | GSD or `pipeline-doc-update` |
+| `.gsd/DECISIONS.md` | Architectural decisions (append-only log) | GSD or `pipeline-doc-update` (append only) |
+| `.gsd/TESTING.md` | Test strategy — how this project is tested | `/pipeline-test-setup` only |
+| `.gsd/CODEBASE.md` | Project file map | `gsd init` (auto-generated) |
+| `docs/superpowers/specs/` | Decision records from brainstorming | Superpowers (ephemeral) |
+| `docs/superpowers/plans/` | Implementation plans | Superpowers (ephemeral) |
+
+**Doc update rules:**
+- After **GSD execution**: docs are already current (GSD updates them during milestones)
+- After **Superpowers execution**: run `/pipeline-doc-update` — it reads git diff and updates `.gsd/` files
+- `pipeline-doc-update` also runs `gsd headless "init"` to refresh CODEBASE.md (the file map)
+- Never manually edit `.gsd/STATE.md` — GSD's internal state machine
 
 ## Testing
 
@@ -62,45 +43,92 @@ Strategy defined in `.gsd/TESTING.md`. Quick reference:
 - **Unit:** `[test command]`
 - **QA:** `/pipeline-qa`
 
-## Who Does What
+## Grounding Rules
 
-**Superpowers** — brainstorming, spec writing, planning, TDD, systematic debugging, code review, subagent execution, worktree management, branch finishing, verification. The engine for all coding work. Skills auto-chain: brainstorming → writing-plans → worktree → subagent-driven-development → finishing-a-development-branch.
+1. **Read before acting.** Start every task by reading this file + `.gsd/PROJECT.md` + `.gsd/KNOWLEDGE.md`. Never assume — verify.
+2. **Follow TESTING.md.** Run tests using the exact commands in `.gsd/TESTING.md`. Don't improvise test commands.
+3. **Evidence before claims.** Show fresh test output before declaring work done. No stale assumptions.
+4. **Update docs after structural changes.** Run `/pipeline-doc-update` after adding routes, models, components, or changing architecture.
+5. **Atomic commits.** One logical change per commit. Conventional messages: `feat:`, `fix:`, `refactor:`, `docs:`, `test:`.
 
-**GSD v2** (`gsd headless`) — parallel autonomous execution for large tasks (>10). Wave-based parallelism with atomic commits. Workers auto-load Superpowers. Templates: bugfix, small-feature, refactor, hotfix, spike, dep-upgrade, security-audit.
+## Tools Reference
 
-**gstack** — office-hours (requirements via 6 forcing questions), review (SQL safety, trust boundaries, conditional side effects), qa (browser test-fix loop), qa-only (browser report only), cso (security audit: daily/comprehensive), investigate (root cause debugging with browse daemon), browse (headless browser ~100ms), careful (destructive command guardrails), benchmark (Core Web Vitals, baselines, regression detection), learn (persistent learnings across sessions), ship (VERSION, CHANGELOG, review, PR), land-and-deploy (merge, CI, deploy verify), canary (post-deploy monitoring 30min).
+### Superpowers (thinking + coding)
 
-**Paper** (MCP, optional) — UI component design exploration. Creates 3 design options for new components, user picks, exports JSX/style tokens to `.gsd/designs/`.
+| Skill | When to use |
+|-------|------------|
+| `brainstorming` | Exploring a new feature, design decisions, architecture choices |
+| `writing-plans` | Auto-invoked by brainstorming — creates task breakdown |
+| `test-driven-development` | Writing a feature with clear requirements — test first, then implement |
+| `systematic-debugging` | Bug with unclear cause — 4-phase root cause investigation |
+| `subagent-driven-development` | Executing a plan with multiple tasks (auto uses worktree) |
+| `finishing-a-development-branch` | After execution — merge, PR, keep, or discard the branch |
+| `verification-before-completion` | Final check — runs tests with fresh output |
 
-## Phase Delegation
+### GSD v2 (parallel autonomous execution)
 
-| Phase | Owner | How |
-|-------|-------|-----|
-| Requirements | gstack `/office-hours` | 6 forcing questions, saves design doc |
-| Brainstorm + Spec | Superpowers `brainstorming` | Interactive, outputs to `docs/superpowers/specs/` |
-| Plan | Superpowers `writing-plans` | Auto-invoked by brainstorming, tasks with tags |
-| Design gate | Pipeline + Paper MCP | 3 options per ui-new component |
-| Worktree setup | Superpowers `using-git-worktrees` | Isolated branch, clean baseline |
-| Execute (≤10 tasks) | Superpowers `subagent-driven-development` | Per-task dispatch, two-stage review |
-| Execute (>10 tasks) | GSD `gsd headless auto` | Parallel waves, workers have Superpowers |
-| Finish branch | Superpowers `finishing-a-development-branch` | 4 options: merge/PR/keep/discard |
-| QA (report) | gstack `/qa-only` + `/cso` + `/benchmark` | Report only, no fixes |
-| QA (fix bugs) | Superpowers `systematic-debugging` / `TDD` | Routed by issue type |
-| QA (browser fix) | gstack `/qa` | Test-fix-verify loop |
-| Doc update | Pipeline skill | Fork reads git diff, updates docs/ |
-| Ship | gstack `/ship` | VERSION, CHANGELOG, review, PR |
-| Deploy | gstack `/land-and-deploy` → `/canary` | Merge, CI, deploy verify, 30min monitor |
-| Learnings | gstack `/learn` | Store patterns from this session |
+| Command | When to use |
+|---------|------------|
+| `gsd headless "init"` | Initialize GSD state (creates CODEBASE.md + STATE.md) |
+| `gsd headless new-milestone --context <spec> --auto` | Large tasks — takes a Superpowers spec as input, parallel execution |
+| `gsd headless "start <template> <desc>"` | Start a workflow from a template |
+| Templates: `bugfix`, `small-feature`, `refactor`, `hotfix`, `spike`, `dep-upgrade`, `security-audit` | Pick based on task type |
 
-## Rules
+GSD creates its own branch and manages docs (PROJECT.md, KNOWLEDGE.md, RUNTIME.md, DECISIONS.md) during milestones. Skip worktree setup when using GSD.
 
-1. **Delegate, don't duplicate.** Use Superpowers skills and gstack commands. The pipeline only adds orchestration.
-2. **Worktree before execution.** Always set up an isolated worktree via `using-git-worktrees` before running `subagent-driven-development` or `executing-plans`.
-3. **Let Superpowers finish.** After execution, `finishing-a-development-branch` presents merge/PR/keep/discard options. Let it complete before offering gstack:ship.
-4. **Report first, fix second.** QA uses `qa-only` (report). Fixes are routed through `systematic-debugging` (unclear bugs), `test-driven-development` (clear fixes), or `gstack:qa` (browser test-fix loops).
-5. **No double review.** If `gstack:ship` will run, skip `gstack:review` in QA — ship runs review internally.
-6. **Tag tasks in plans.** Every task must have one tag: `<!-- tag: ui-new -->`, `<!-- tag: ui-update -->`, or `<!-- tag: logic -->`.
-7. **Design before implement.** `ui-new` tasks go through Paper design gate before execution.
-8. **Docs stay current.** After any pipeline run, update docs/ to reflect what changed.
-9. **Fallback gracefully.** If a tool isn't installed, use the next best option.
-10. **Evidence before claims.** Always run `verification-before-completion` before declaring work done — fresh test output, not stale assumptions.
+### gstack (operations)
+
+| Skill | When to use |
+|-------|------------|
+| `/office-hours` | Thinking through a new idea — 6 forcing questions |
+| `/review` | Pre-landing code review (SQL safety, trust boundaries) |
+| `/qa` | Browser test-fix-verify loop |
+| `/qa-only` | Browser QA report only — no fixes |
+| `/cso` | Security audit (OWASP, STRIDE, dependency scanning) |
+| `/investigate` | Production debugging with browse daemon |
+| `/benchmark` | Performance baseline + regression detection |
+| `/ship` | VERSION bump, CHANGELOG, review, PR creation |
+| `/land-and-deploy` | Merge, CI, deploy, verify |
+| `/canary` | Post-deploy monitoring (30min) |
+| `/learn` | Store patterns from this session |
+| `/careful` | Safety guardrails for destructive commands |
+
+## Workflow Guidance
+
+### Building a new feature
+
+Use `/pipeline-build <description>` for the full orchestrated flow, or run steps manually:
+
+1. Read `.gsd/PROJECT.md` + `.gsd/KNOWLEDGE.md` for context
+2. `Skill(superpowers:brainstorming)` — explore approaches, output spec
+3. Plan auto-generates from brainstorming
+4. Choose execution: Superpowers (focused, interactive) or GSD (large tasks, autonomous)
+5. After execution: `/pipeline-doc-update` to sync `.gsd/` docs
+6. `/pipeline-qa` — tests + review + security. Fixes and re-runs until clean.
+7. `Skill(gstack:ship)` — when ready to land
+
+### Fixing a bug
+
+- **Unclear cause:** `Skill(superpowers:systematic-debugging)` — 4-phase investigation
+- **Clear fix needed:** `Skill(superpowers:test-driven-development)` — write failing test, then fix
+- **Production error:** `Skill(gstack:investigate)` — has browse daemon + learnings
+
+### Quick small change
+
+1. Make the change directly
+2. Run tests from `.gsd/TESTING.md`
+3. If structure changed, run `/pipeline-doc-update`
+
+## Pipeline Commands
+
+| Command | Purpose |
+|---------|---------|
+| `/pipeline-build` | Build a feature — brainstorm → plan → execute (Superpowers or GSD) → doc update → QA → iterate → ship |
+| `/pipeline-init` | Set up pipeline on a new or existing project (discovery, docs, testing, CLAUDE.md) |
+| `/pipeline-qa` | Run QA — reads TESTING.md, dispatches tests, produces severity-ranked report |
+| `/pipeline-doc-update` | Update `.gsd/` docs from recent code changes (reads git diff) |
+| `/pipeline-test-setup` | Interactive test strategy questionnaire — writes .gsd/TESTING.md |
+
+## Conventions
+
+[From discovery — naming patterns, file organization, commit style, etc.]
