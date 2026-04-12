@@ -1,0 +1,202 @@
+#!/usr/bin/env bash
+# coolcode setup — install the pipeline framework for Claude Code
+set -e
+
+COOLCODE_DIR="$(cd "$(dirname "$0")" && pwd)"
+SKILLS_DIR="$HOME/.claude/skills"
+SETTINGS="$HOME/.claude/settings.json"
+
+echo ""
+echo "  coolcode — Claude Code Pipeline Framework"
+echo "  =========================================="
+echo ""
+
+# ─── 1. Symlink pipeline skills ──────────────────────────────────────────────
+
+echo "→ Installing pipeline skills..."
+mkdir -p "$SKILLS_DIR"
+
+for skill_dir in "$COOLCODE_DIR"/skills/pipeline-*; do
+  skill_name=$(basename "$skill_dir")
+  target="$SKILLS_DIR/$skill_name"
+
+  # Remove existing (file, dir, or broken symlink)
+  if [ -e "$target" ] || [ -L "$target" ]; then
+    rm -rf "$target"
+  fi
+
+  ln -s "$skill_dir" "$target"
+  echo "  ✓ $skill_name → $skill_dir"
+done
+
+# ─── 2. Install GSD v2 CLI ──────────────────────────────────────────────────
+
+if command -v gsd >/dev/null 2>&1; then
+  GSD_VERSION=$(gsd --version 2>/dev/null || echo "unknown")
+  echo ""
+  echo "→ GSD v2 already installed ($GSD_VERSION)"
+else
+  echo ""
+  echo "→ Installing GSD v2 CLI..."
+  npm install -g gsd-pi@latest
+  echo "  ✓ GSD v2 installed ($(gsd --version 2>/dev/null))"
+fi
+
+# ─── 3. Install gstack ──────────────────────────────────────────────────────
+
+GSTACK_DIR="$SKILLS_DIR/gstack"
+
+if [ -d "$GSTACK_DIR" ]; then
+  echo ""
+  echo "→ gstack already installed at $GSTACK_DIR"
+else
+  echo ""
+  echo "→ Installing gstack..."
+
+  # Check for bun
+  if ! command -v bun >/dev/null 2>&1; then
+    echo "  Installing bun (gstack dependency)..."
+    if command -v brew >/dev/null 2>&1; then
+      HOMEBREW_NO_AUTO_UPDATE=1 brew install oven-sh/bun/bun
+    else
+      curl -fsSL https://bun.sh/install | bash
+    fi
+  fi
+
+  git clone --single-branch --depth 1 https://github.com/garrytan/gstack.git "$GSTACK_DIR"
+  cd "$GSTACK_DIR" && ./setup
+  cd "$COOLCODE_DIR"
+  echo "  ✓ gstack installed"
+fi
+
+# ─── 4. Configure gstack skills ─────────────────────────────────────────────
+
+echo ""
+echo "→ Configuring gstack skills..."
+
+ENABLED_FILE="$COOLCODE_DIR/gstack-config/enabled-skills.txt"
+ENABLED_SKILLS=""
+if [ -f "$ENABLED_FILE" ]; then
+  ENABLED_SKILLS=$(cat "$ENABLED_FILE" | tr '\n' '|' | sed 's/|$//')
+fi
+
+# Use node for reliable frontmatter manipulation
+if [ -d "$GSTACK_DIR" ] && [ -n "$ENABLED_SKILLS" ]; then
+  node -e "
+    const fs = require('fs');
+    const path = require('path');
+    const enabled = '$ENABLED_SKILLS'.split('|').filter(Boolean);
+    const gstackDir = '$GSTACK_DIR';
+    const skip = new Set(['lib', 'bin', 'agents', 'node_modules', '.git']);
+
+    for (const entry of fs.readdirSync(gstackDir)) {
+      if (skip.has(entry)) continue;
+      const skillMd = path.join(gstackDir, entry, 'SKILL.md');
+      if (!fs.existsSync(skillMd)) continue;
+
+      let content = fs.readFileSync(skillMd, 'utf8');
+      const isEnabled = enabled.includes(entry);
+      const hasDisable = content.includes('disable-model-invocation: true');
+
+      if (isEnabled && hasDisable) {
+        // Remove the disable line
+        content = content.replace(/^disable-model-invocation: true\n/m, '');
+        fs.writeFileSync(skillMd, content);
+        console.log('  ✓ enabled: ' + entry);
+      } else if (!isEnabled && !hasDisable) {
+        // Add disable after the opening ---
+        content = content.replace(/^---\n/, '---\ndisable-model-invocation: true\n');
+        fs.writeFileSync(skillMd, content);
+        console.log('  ✗ disabled: ' + entry);
+      }
+    }
+  "
+else
+  echo "  (skipped — gstack not found or no enabled-skills.txt)"
+fi
+
+# ─── 5. Update settings.json permissions ─────────────────────────────────────
+
+echo ""
+echo "→ Checking settings.json permissions..."
+
+if [ ! -f "$SETTINGS" ]; then
+  echo "  ⚠ No settings.json found at $SETTINGS"
+  echo "  Create one or run Claude Code first, then re-run setup."
+else
+  # Use node for reliable JSON manipulation
+  node -e "
+    const fs = require('fs');
+    const settings = JSON.parse(fs.readFileSync('$SETTINGS', 'utf8'));
+    if (!settings.permissions) settings.permissions = {};
+    if (!settings.permissions.allow) settings.permissions.allow = [];
+
+    const toAdd = [
+      'Skill(pipeline-new)',       'Skill(pipeline-new:*)',
+      'Skill(pipeline-init)',      'Skill(pipeline-init:*)',
+      'Skill(pipeline-build)',     'Skill(pipeline-build:*)',
+      'Skill(pipeline-quick)',     'Skill(pipeline-quick:*)',
+      'Skill(pipeline-qa)',        'Skill(pipeline-qa:*)',
+      'Skill(pipeline-design-gate)', 'Skill(pipeline-design-gate:*)',
+      'Skill(pipeline-doc-update)', 'Skill(pipeline-doc-update:*)',
+      'Skill(pipeline-scaffold)',  'Skill(pipeline-scaffold:*)',
+      'Skill(pipeline-test-setup)', 'Skill(pipeline-test-setup:*)',
+      'Skill(gstack:review)',      'Skill(gstack:review:*)',
+      'Skill(gstack:qa)',          'Skill(gstack:qa:*)',
+      'Skill(gstack:cso)',         'Skill(gstack:cso:*)',
+      'Skill(gstack:office-hours)', 'Skill(gstack:office-hours:*)',
+      'Skill(gstack:investigate)', 'Skill(gstack:investigate:*)',
+      'Skill(gstack:browse)',      'Skill(gstack:browse:*)',
+      'Skill(gstack:careful)',     'Skill(gstack:careful:*)',
+      'Skill(gstack:qa-only)',     'Skill(gstack:qa-only:*)',
+      'Skill(gstack:benchmark)',   'Skill(gstack:benchmark:*)',
+      'Skill(gstack:learn)',       'Skill(gstack:learn:*)',
+      'Skill(gstack:ship)',        'Skill(gstack:ship:*)',
+      'Skill(gstack:land-and-deploy)', 'Skill(gstack:land-and-deploy:*)',
+      'Skill(gstack:canary)',      'Skill(gstack:canary:*)',
+      'Bash(gsd *)'
+    ];
+
+    let added = 0;
+    for (const perm of toAdd) {
+      if (!settings.permissions.allow.includes(perm)) {
+        settings.permissions.allow.push(perm);
+        added++;
+      }
+    }
+
+    if (added > 0) {
+      fs.writeFileSync('$SETTINGS', JSON.stringify(settings, null, 2) + '\n');
+      console.log('  ✓ Added ' + added + ' permissions');
+    } else {
+      console.log('  ✓ All permissions already present');
+    }
+  "
+fi
+
+# ─── 6. Check Superpowers ───────────────────────────────────────────────────
+
+echo ""
+if ls "$HOME"/.claude/plugins/cache/claude-plugins-official/superpowers/*/skills/ >/dev/null 2>&1; then
+  SP_VERSION=$(ls -d "$HOME"/.claude/plugins/cache/claude-plugins-official/superpowers/*/ 2>/dev/null | tail -1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+')
+  echo "→ Superpowers detected (v$SP_VERSION) ✓"
+else
+  echo "→ ⚠ Superpowers not detected."
+  echo "  Install from Claude Code: /install-plugin superpowers"
+fi
+
+# ─── Done ────────────────────────────────────────────────────────────────────
+
+echo ""
+echo "  ✓ Setup complete!"
+echo ""
+echo "  Pipeline commands available (restart Claude Code session to load):"
+echo "    /pipeline-new    — Start a new project from scratch"
+echo "    /pipeline-init   — Add pipeline to an existing project"
+echo "    /pipeline-build  — Build a feature (full pipeline)"
+echo "    /pipeline-quick  — Quick fix or small feature"
+echo "    /pipeline-qa     — Run QA on current state"
+echo ""
+echo "  To use in a project, copy templates/CLAUDE.md into your project root"
+echo "  and customize it for your project."
+echo ""

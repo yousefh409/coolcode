@@ -1,0 +1,13 @@
+review
+qa
+cso
+office-hours
+investigate
+browse
+careful
+qa-only
+benchmark
+learn
+ship
+land-and-deploy
+canary

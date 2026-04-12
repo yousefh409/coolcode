@@ -1,0 +1,219 @@
+---
+name: pipeline-test-setup
+description: Interactive test strategy questionnaire. Asks about platform, tools, commands, env vars, and writes .gsd/TESTING.md.
+disable-model-invocation: true
+user-invocable: false
+allowed-tools: Read, Write, Edit, Bash, Glob, Grep, AskUserQuestion
+---
+
+# Pipeline Test Setup
+
+Interactive questionnaire to define how this project is tested. Writes `.gsd/TESTING.md`.
+
+Called by `/pipeline-new` and `/pipeline-init`. Can also be re-run to update test strategy.
+
+Existing test config: !`[ -f .gsd/TESTING.md ] && head -5 .gsd/TESTING.md || echo "NONE"`
+Package.json: !`[ -f package.json ] && head -20 package.json || echo "NO package.json"`
+Pyproject.toml: !`[ -f pyproject.toml ] && head -10 pyproject.toml || echo "NO pyproject.toml"`
+
+## Process
+
+### 1. Auto-detect what you can
+
+Before asking questions, scan the project:
+
+- **Package manager:** Check for `package.json`, `pyproject.toml`, `go.mod`, `Cargo.toml`, `Gemfile`
+- **Test framework:** Look for `jest.config.*`, `vitest.config.*`, `pytest.ini`, `setup.cfg [tool:pytest]`, `.mocharc.*`, `playwright.config.*`, `cypress.config.*`, `maestro/`, `detox` in package.json
+- **Test scripts:** Read `package.json` scripts for `test`, `test:unit`, `test:e2e`, `test:integration`
+- **CI config:** Check `.github/workflows/`, `.gitlab-ci.yml`, `Dockerfile`, `vercel.json`, `netlify.toml`, `fly.toml`
+- **Dev server:** Look for `dev` script in package.json, `Procfile`, `docker-compose.yml`
+- **Env files:** Check for `.env.example`, `.env.test`, `.env.local`
+
+Collect findings — use them as defaults in questions.
+
+### 2. Ask core questions
+
+Use `AskUserQuestion` with these questions:
+
+**Question 1: Platform & Framework**
+- Header: "Platform"
+- Options based on what was detected, or:
+  - "Web (Next.js / React / Vue / etc.)"
+  - "Mobile (React Native / Expo / Flutter / Swift / Kotlin)"
+  - "API (Express / FastAPI / Django / Go / etc.)"
+  - "CLI / Library"
+- Pre-select based on detection
+
+**Question 2: Test types that apply**
+- Header: "Test types"
+- multiSelect: true
+- Options:
+  - "Unit tests" — pure functions, hooks, handlers
+  - "Integration tests" — API → DB, multi-component, auth chains
+  - "E2E browser tests" — full user flows in headless browser
+  - "E2E simulator/device tests" — native mobile testing
+  - "Performance benchmarks" — load time, bundle size, Core Web Vitals
+  - "Security audits" — OWASP, secrets, dependency scanning
+
+### 3. Ask follow-up questions based on selections
+
+For each test type selected, ask targeted follow-ups:
+
+**If unit tests selected:**
+Use `AskUserQuestion`:
+- "What's the test runner and run command?" (Header: "Unit tests")
+- Options based on detection:
+  - `npm test` / `bun test` / `npx vitest` / `pytest` / `go test ./...` / Other
+- If "Other", ask for exact command
+
+**If integration tests selected:**
+Use `AskUserQuestion`:
+- "What setup is needed before integration tests?" (Header: "Integration", multiSelect: true)
+- Options:
+  - "Start dev server" — ask for command
+  - "Seed database" — ask for command
+  - "Environment variables" — ask which ones (list them, don't ask for values)
+  - "Docker services" — ask for docker-compose service names
+  - "None — tests are self-contained"
+
+**If E2E browser selected:**
+Use `AskUserQuestion`:
+- "What browser test tool?" (Header: "Browser E2E")
+- Options based on detection:
+  - "Playwright" / "Cypress" / "gstack /qa (headless Chromium)" / "Other"
+- Then ask: "Where do browser tests point?"
+  - "Local dev server" — ask for URL (default: http://localhost:3000)
+  - "Deployed staging URL" — ask for URL
+  - "Both"
+
+**If simulator/device selected:**
+Use `AskUserQuestion`:
+- "What mobile test tool?" (Header: "Mobile E2E")
+- Options:
+  - "Maestro" / "Detox" / "XCTest" / "Espresso" / "Manual via simulator" / "Other"
+- Then ask for:
+  - Run command (e.g., `maestro test flows/`, `npx detox test`)
+  - Simulator type (iOS Simulator / Android Emulator / Both)
+
+**If performance selected:**
+Use `AskUserQuestion`:
+- "How to run performance tests?" (Header: "Performance")
+- Options:
+  - "gstack /benchmark (Core Web Vitals via headless browser)"
+  - "Lighthouse CI"
+  - "Custom script" — ask for command
+  - "No automation yet — just gstack /benchmark"
+
+**If security selected:**
+- No follow-up needed — gstack `/cso` handles this. Note it in the config.
+
+### 4. Ask about CI
+
+Use `AskUserQuestion`:
+- "What CI system runs tests?" (Header: "CI")
+- Options based on detection:
+  - "GitHub Actions" / "Vercel" / "Netlify" / "GitLab CI" / "None — local only" / "Other"
+
+### 5. Ask about environment variables
+
+Use `AskUserQuestion`:
+- "Do tests need environment variables?" (Header: "Env vars")
+- Options:
+  - "Yes — from .env.test file" (ask for path)
+  - "Yes — specific variables" (ask user to list KEY names, NOT values)
+  - "No"
+
+### 6. Write .gsd/TESTING.md
+
+Use the Write tool to create `.gsd/TESTING.md` from all answers:
+
+```markdown
+# Testing Strategy
+
+Generated by `/pipeline-test-setup` — edit as needed.
+
+## Project Profile
+
+- **Platform:** [answer]
+- **Framework:** [detected or answered]
+- **Test runner:** [answer]
+- **Test command:** [answer]
+- **Dev server command:** [answer or N/A]
+- **Dev server URL:** [answer or N/A]
+- **Deployed URL:** [answer or N/A]
+- **CI:** [answer]
+
+## Environment
+
+- **Env file:** [path or N/A]
+- **Required variables:** [KEY1, KEY2, ... or N/A]
+- **Setup commands:** [list or N/A]
+- **Teardown commands:** [list or N/A]
+
+## Test Types
+
+### Unit Tests
+- **Command:** [exact command]
+- **Covers:** [what areas]
+
+### Integration Tests
+- **Command:** [exact command]
+- **Setup required:** [list]
+- **Covers:** [what areas]
+
+### E2E Browser
+- **Tool:** [playwright / cypress / gstack qa]
+- **Command:** [exact command or "Skill(gstack:qa)"]
+- **Target URL:** [URL]
+- **Covers:** [user flows]
+
+### E2E Simulator
+- **Tool:** [maestro / detox / etc.]
+- **Command:** [exact command]
+- **Simulator:** [iOS / Android / Both]
+- **Covers:** [flows]
+
+### Performance
+- **Tool:** [benchmark / lighthouse / custom]
+- **Command:** [exact command or "Skill(gstack:benchmark)"]
+- **Baselines:** TBD — established on first run
+
+### Security
+- **Tool:** gstack /cso
+- **Command:** `Skill(gstack:cso)`
+- **Scope:** OWASP Top 10 + STRIDE + dependency audit
+
+## QA Phase Behavior
+
+When `/pipeline-qa` runs, it reads this file and:
+1. Checks platform → skips inapplicable test types
+2. Runs setup commands if needed
+3. Executes each test type with the exact commands above
+4. Reports by severity: critical, important, minor
+5. Offers to fix critical/important issues via `/pipeline-quick`
+
+## Test Matrix
+
+| Feature Area | Unit | Integration | Browser | Simulator | Perf | Security |
+|-------------|------|-------------|---------|-----------|------|----------|
+| (fill in as features are built) | | | | | | |
+```
+
+Only include sections for test types the user selected. Omit sections for unselected types.
+
+### 7. Update CLAUDE.md testing section
+
+If `CLAUDE.md` exists, use Edit to update the `## Testing` section (or add one if missing):
+
+```markdown
+## Testing
+
+Strategy defined in `.gsd/TESTING.md`. Quick reference:
+- **Unit:** `[command]`
+- **E2E:** `[command or tool]`
+- **QA:** `/pipeline-qa`
+```
+
+## Done
+
+Report what was configured. The caller will continue with the next pipeline phase.
