@@ -159,6 +159,7 @@ else
       'Skill(gstack:ship)',        'Skill(gstack:ship:*)',
       'Skill(gstack:land-and-deploy)', 'Skill(gstack:land-and-deploy:*)',
       'Skill(gstack:canary)',      'Skill(gstack:canary:*)',
+      'Skill(superpowers:*)',
       'Bash(gsd *)'
     ];
 

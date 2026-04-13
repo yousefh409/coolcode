@@ -13,6 +13,7 @@ End-to-end feature build. Each step delegates to the right tool — this skill o
 
 **Input:** `$ARGUMENTS` = feature description
 
+Superpowers installed: !`ls ~/.claude/plugins/cache/claude-plugins-official/superpowers/*/skills/ 2>/dev/null && echo "YES" || ls "$HOME/Library/Application Support"/21st-desktop/claude-sessions/*/plugins/cache/claude-plugins-official/superpowers/*/skills/ 2>/dev/null && echo "YES" || echo "NO"`
 GSD installed: !`which gsd 2>/dev/null && echo "YES" || echo "NO"`
 gstack installed: !`ls ~/.claude/skills/gstack/review/SKILL.md 2>/dev/null && echo "YES" || echo "NO"`
 Project docs: !`[ -f .gsd/PROJECT.md ] && head -5 .gsd/PROJECT.md || echo "NO PROJECT.md"`
@@ -46,6 +47,8 @@ Pass the feature description from `$ARGUMENTS`. Brainstorming outputs a spec to 
 
 Wait for both to complete. Note the spec file path — GSD needs it if the user chooses the GSD path.
 
+**If Superpowers is not available:** Use `EnterPlanMode` to brainstorm and plan directly. Write the spec to `docs/superpowers/specs/` yourself, then write the plan to `docs/superpowers/plans/`.
+
 ### 3. Choose Execution Engine
 
 Use `AskUserQuestion`:
@@ -66,6 +69,8 @@ Superpowers auto-manages worktree setup. After execution:
 Skill(superpowers:finishing-a-development-branch)
 ```
 This presents merge/PR/keep/discard options.
+
+**If Superpowers is not available:** Implement the plan directly using Agent sub-agents for parallelizable tasks. Use `EnterWorktree` for isolation, then implement each task. When done, commit and present merge/PR options to the user.
 
 **If GSD:**
 ```bash
